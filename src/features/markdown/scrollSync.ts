@@ -106,18 +106,22 @@ function parseBlocks(text: string): ParsedBlock[] {
 /**
  * Measure the textarea scrollTop offset where each block begins.
  * Uses a hidden clone textarea to get accurate pixel positions.
+ *
+ * The measurement loop is split into chunks that yield to the main thread
+ * via setTimeout(0), so large documents don't freeze the UI during note switch.
+ * Pass an AbortSignal to cancel an in-progress measurement (e.g. when the
+ * user switches notes before the previous measurement finishes).
  */
-export function measureBlockOffsets(
+export async function measureBlockOffsets(
   content: string,
   sourceTextarea: HTMLTextAreaElement,
-): number[] {
+  signal?: AbortSignal,
+): Promise<number[]> {
   const blocks = parseBlocks(content);
   if (blocks.length === 0) return [];
 
   const style = getComputedStyle(sourceTextarea);
-  const paddingTop = parseFloat(style.paddingTop) || 0;
-  const paddingBottom = parseFloat(style.paddingBottom) || 0;
-  const totalPadding = paddingTop + paddingBottom;
+  const totalPadding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
 
   const measure = document.createElement("textarea");
   measure.style.cssText = `
@@ -142,13 +146,30 @@ export function measureBlockOffsets(
   `;
   document.body.appendChild(measure);
 
-  const lines = content.split("\n");
-  // offsets[i] = textarea.scrollTop that puts block[i] at the top
-  const offsets: number[] = [0];
+  // Pre-compute line-end character positions to avoid split+slice+join per block.
+  const lineEnds: number[] = [];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === "\n") lineEnds.push(i);
+  }
+  lineEnds.push(content.length);
 
-  for (let i = 0; i < blocks.length - 1; i++) {
-    measure.value = lines.slice(0, blocks[i].endLine).join("\n");
+  const offsets: number[] = [0];
+  const total = blocks.length - 1;
+  const CHUNK = 8; // yield every 8 reflows (~2–4ms) to keep UI responsive
+
+  for (let i = 0; i < total; i++) {
+    const endLine = blocks[i].endLine;
+    const endPos = endLine > 0 ? lineEnds[endLine - 1] : 0;
+    measure.value = endPos > 0 ? content.slice(0, endPos) : "";
     offsets.push(measure.scrollHeight - totalPadding);
+
+    if ((i + 1) % CHUNK === 0 && i < total - 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      if (signal?.aborted) {
+        document.body.removeChild(measure);
+        return offsets; // partial result, caller will discard
+      }
+    }
   }
 
   document.body.removeChild(measure);

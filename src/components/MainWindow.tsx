@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
@@ -356,6 +356,10 @@ export function MainWindow({
   const blockOffsets = useRef<number[]>([]);
   const scrollSource = useRef<"editor" | "preview" | null>(null);
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const measureDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const measureRafRef = useRef<number>(0);
+  const measureControllerRef = useRef<AbortController | null>(null);
+  const prevSelectedIdRef = useRef(selectedId);
   const externalFileMtimeRef = useRef<number>(0);
   const lastExternalSaveRef = useRef<number>(0);
   const imageBaseDir = useImageBaseDir();
@@ -1505,16 +1509,52 @@ export function MainWindow({
     };
   }, [isResizingSplit]);
 
-  // Measure block offsets + tag preview DOM after content or viewMode changes
-  useLayoutEffect(() => {
+  // Measure block offsets + tag preview DOM after content or viewMode changes.
+  // Note switch: measure via rAF (does not block first paint).
+  // Editing: debounce 250ms to avoid N reflows on every keystroke.
+  // Measurement is chunked with setTimeout(0) yields so the main thread
+  // stays responsive even for long documents.
+  useEffect(() => {
     if (viewMode !== "split") return;
-    const textarea = contentRef.current;
-    const preview = previewScrollRef.current;
-    if (!textarea || !preview) return;
+    if (!contentRef.current || !previewScrollRef.current) return;
 
-    blockOffsets.current = measureBlockOffsets(content, textarea);
-    tagPreviewBlocks(preview);
-  }, [content, viewMode]);
+    // Clear stale offsets so scroll handlers return early during measurement
+    blockOffsets.current = [];
+
+    const isNoteSwitch = prevSelectedIdRef.current !== selectedId;
+    prevSelectedIdRef.current = selectedId;
+
+    if (measureDebounceRef.current) clearTimeout(measureDebounceRef.current);
+    cancelAnimationFrame(measureRafRef.current);
+    measureControllerRef.current?.abort();
+
+    const controller = new AbortController();
+    measureControllerRef.current = controller;
+
+    const measure = async () => {
+      if (!contentRef.current || !previewScrollRef.current) return;
+      const offsets = await measureBlockOffsets(content, contentRef.current, controller.signal);
+      if (controller.signal.aborted) return;
+      blockOffsets.current = offsets;
+      if (!controller.signal.aborted && previewScrollRef.current) {
+        tagPreviewBlocks(previewScrollRef.current);
+      }
+    };
+
+    if (isNoteSwitch) {
+      measureRafRef.current = requestAnimationFrame(() => {
+        measure();
+      });
+    } else {
+      measureDebounceRef.current = setTimeout(measure, 250);
+    }
+
+    return () => {
+      if (measureDebounceRef.current) clearTimeout(measureDebounceRef.current);
+      cancelAnimationFrame(measureRafRef.current);
+      measureControllerRef.current?.abort();
+    };
+  }, [content, viewMode, selectedId]);
 
   // Reset preview scroll on note switch
   useEffect(() => {
