@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { getConfig } from "../features/settings/api";
 import type { AppConfig } from "../features/settings/types";
 import { requestSurfaceAction } from "../features/windows/surfaceActions";
@@ -13,11 +14,17 @@ interface MenuState {
   type: "edit" | "tile";
 }
 
+const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
+const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+
 export function ContextMenuProvider({ children }: { children: React.ReactNode }) {
   const { t } = useTranslation();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [menuClosing, setMenuClosing] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const editableTargetRef = useRef<HTMLInputElement | HTMLTextAreaElement | HTMLElement | null>(
+    null,
+  );
   const tileCtrlCloseRef = useRef(true);
   const tileContextMenuItems = useMemo(() => getTileContextMenuItems(t), [t]);
 
@@ -53,7 +60,10 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
         requestSurfaceAction("close");
         return;
       }
-      const selection = window.getSelection()?.toString() || "";
+      let selection = window.getSelection()?.toString() || "";
+      if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+        selection = target.value.slice(target.selectionStart ?? 0, target.selectionEnd ?? 0);
+      }
 
       let x = event.clientX;
       let y = event.clientY;
@@ -63,6 +73,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
       if (y + menuHeight > window.innerHeight) y = window.innerHeight - menuHeight - 4;
 
       if (tileTarget) {
+        editableTargetRef.current = null;
         setMenuClosing(false);
         setMenu({
           x,
@@ -73,6 +84,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
         return;
       }
 
+      editableTargetRef.current = target;
       setMenuClosing(false);
       setMenu({ x, y, hasSelection: selection.length > 0, type: "edit" });
     }
@@ -108,8 +120,50 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
     setMenuClosing(true);
   }, []);
 
-  const runCommand = (command: string) => {
-    document.execCommand(command);
+  const runCommand = async (command: string) => {
+    const target = editableTargetRef.current;
+
+    if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) {
+      const start = target.selectionStart ?? 0;
+      const end = target.selectionEnd ?? 0;
+      const value = target.value;
+      const selected = value.slice(start, end);
+      const before = value.slice(0, start);
+      const after = value.slice(end);
+
+      target.focus();
+
+      const nativeSetter = target instanceof HTMLTextAreaElement ? textareaSetter : inputSetter;
+      const setValue = (newValue: string, cursorPos: number) => {
+        nativeSetter?.call(target, newValue);
+        target.selectionStart = target.selectionEnd = cursorPos;
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+
+      switch (command) {
+        case "copy":
+          if (selected) await writeText(selected);
+          break;
+        case "cut":
+          if (selected) {
+            await writeText(selected);
+            setValue(before + after, start);
+          }
+          break;
+        case "paste": {
+          const text = await readText();
+          setValue(before + text + after, start + text.length);
+          break;
+        }
+        case "selectAll":
+          target.select();
+          break;
+      }
+    } else {
+      target?.focus();
+      document.execCommand(command);
+    }
+
     dismissMenu();
   };
 

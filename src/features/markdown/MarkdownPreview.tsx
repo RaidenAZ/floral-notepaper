@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -7,13 +7,13 @@ import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import rehypeSlug from "rehype-slug";
-import type { Pluggable } from "unified";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Components } from "react-markdown";
 import "katex/dist/katex.min.css";
 import remarkAlerts from "./remarkAlerts";
 
-function CodeBlock({ children }: { children: React.ReactNode }) {
+function CodeBlock({ children, language }: { children: React.ReactNode; language?: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
@@ -26,7 +26,16 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
   }, [children]);
 
   return (
-    <pre className="my-3 px-4 py-3 rounded bg-paper-warm/80 overflow-x-auto relative group">
+    <pre
+      className={`my-3 px-4 rounded bg-paper-warm/80 overflow-x-auto relative group ${
+        language ? "pt-8 pb-3" : "py-3"
+      }`}
+    >
+      {language && (
+        <span className="absolute top-2 left-3 text-[10px] font-mono text-ink-faint/70 uppercase tracking-wider select-none">
+          {language}
+        </span>
+      )}
       <button
         type="button"
         onClick={handleCopy}
@@ -56,6 +65,7 @@ interface MarkdownPreviewProps {
   content: string;
   fontSize?: number;
   renderHtml?: boolean;
+  imageBaseDir?: string;
 }
 
 const remarkPlugins = [remarkGfm, remarkMath, remarkAlerts];
@@ -76,12 +86,12 @@ const sanitizeSchema = {
   },
 };
 const rehypePluginsDefault = [rehypeKatex, rehypeSlug];
-const rehypePluginsWithHtml: Pluggable[] = [
+const rehypePluginsWithHtml = [
   rehypeRaw,
   [rehypeSanitize, sanitizeSchema],
   rehypeKatex,
   rehypeSlug,
-];
+] as Parameters<typeof Markdown>[0]["rehypePlugins"];
 
 function AlertIcon({ type }: { type: string }) {
   switch (type) {
@@ -157,7 +167,7 @@ function Blockquote({
   );
 }
 
-const components: Components = {
+const staticComponents: Components = {
   h1: ({ children, id }) => (
     <h1 id={id} className="text-[1.57em] font-display font-bold text-ink mt-6 mb-4 tracking-wide">
       {children}
@@ -211,7 +221,21 @@ const components: Components = {
       </code>
     );
   },
-  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+  pre: ({ children }) => {
+    // Extract language from the <code> element's className
+    let language = "";
+    if (
+      children != null &&
+      typeof children === "object" &&
+      "props" in (children as React.ReactElement)
+    ) {
+      const codeProps = (children as React.ReactElement<{ className?: string }>).props;
+      const match = codeProps.className?.match(/language-(\S+)/);
+      if (match) language = match[1];
+    }
+
+    return <CodeBlock language={language}>{children}</CodeBlock>;
+  },
   a: ({ href, children }) => (
     <a
       href={href}
@@ -254,8 +278,30 @@ export function MarkdownPreview({
   content,
   fontSize = 14,
   renderHtml = false,
+  imageBaseDir,
 }: MarkdownPreviewProps) {
   const { t } = useTranslation();
+  const components = useMemo<Components>(
+    () => ({
+      ...staticComponents,
+      img: ({ src, alt, ...props }) => {
+        let resolvedSrc = src ?? "";
+        if (src?.startsWith("images/") && imageBaseDir) {
+          resolvedSrc = convertFileSrc(imageBaseDir + "/" + src);
+        }
+        return (
+          <img
+            src={resolvedSrc}
+            alt={alt ?? ""}
+            loading="lazy"
+            className="w-[50%] rounded my-2 mx-auto block"
+            {...props}
+          />
+        );
+      },
+    }),
+    [imageBaseDir],
+  );
   return (
     <div className="font-body" style={{ fontSize: `${fontSize}px` }}>
       {content.trim() ? (
