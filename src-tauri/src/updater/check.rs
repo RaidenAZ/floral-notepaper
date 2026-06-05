@@ -725,6 +725,8 @@ struct GithubApiAsset {
     name: String,
     browser_download_url: String,
     size: u64,
+    #[serde(default)]
+    digest: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -771,6 +773,7 @@ pub(crate) struct GithubDownloadInfo {
     pub asset_name: String,
     pub asset_size: u64,
     pub url: String,
+    pub sha256: Option<String>,
 }
 
 pub(crate) fn fetch_github_download_info(
@@ -832,6 +835,7 @@ pub(crate) fn fetch_github_download_info(
         asset_name: matched.name.clone(),
         asset_size: matched.size,
         url: matched.browser_download_url.clone(),
+        sha256: matched.digest.as_deref().and_then(parse_sha256_from_digest),
     })
 }
 
@@ -865,32 +869,36 @@ fn check_github_api(
         return Err(errors::github_release_no_assets());
     }
 
-    let matched = release
+    let matched_api_asset = release
         .assets
         .iter()
-        .filter_map(|asset| {
+        .find(|asset| {
             platform::infer_asset_from_filename(
                 &asset.name,
                 &asset.browser_download_url,
                 asset.size,
             )
+            .is_some_and(|inferred| {
+                inferred.os == context.platform.os
+                    && inferred.arch == context.platform.arch
+                    && matches_install_kind(&inferred.kind, &context.platform.install_kind)
+            })
         })
-        .find(|inferred| {
-            inferred.os == context.platform.os
-                && inferred.arch == context.platform.arch
-                && matches_install_kind(&inferred.kind, &context.platform.install_kind)
-        });
+        .ok_or_else(|| {
+            errors::with_detail(
+                errors::manifest_asset_not_found(),
+                "platform",
+                format!(
+                    "{:?}-{:?}-{:?}",
+                    context.platform.os, context.platform.arch, context.platform.install_kind
+                ),
+            )
+        })?;
 
-    let matched = matched.ok_or_else(|| {
-        errors::with_detail(
-            errors::manifest_asset_not_found(),
-            "platform",
-            format!(
-                "{:?}-{:?}-{:?}",
-                context.platform.os, context.platform.arch, context.platform.install_kind
-            ),
-        )
-    })?;
+    let asset_sha256 = matched_api_asset
+        .digest
+        .as_deref()
+        .and_then(parse_sha256_from_digest);
 
     Ok(ProviderCheck::Available(Box::new(UpdateCandidate {
         priority,
@@ -898,16 +906,26 @@ fn check_github_api(
         normalized_version,
         release_notes: release.body,
         mandatory: false,
-        asset_name: matched.name,
-        asset_sha256: None,
-        asset_size: matched.size,
-        asset_url: Some(matched.url.clone()),
+        asset_name: matched_api_asset.name.clone(),
+        asset_sha256,
+        asset_size: matched_api_asset.size,
+        asset_url: Some(matched_api_asset.browser_download_url.clone()),
         mirror_chyan_asset_url: None,
-        github_asset_url: Some(matched.url),
+        github_asset_url: Some(matched_api_asset.browser_download_url.clone()),
         can_download_from_mirror_chyan: false,
         can_download_from_github: true,
         sha256_verification_enabled: true,
     })))
+}
+
+/// Parses `"sha256:<hex>"` → `Some("<hex>")`, returns `None` for other formats.
+fn parse_sha256_from_digest(digest: &str) -> Option<String> {
+    let hex = digest.strip_prefix("sha256:")?;
+    if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(hex.to_ascii_lowercase())
+    } else {
+        None
+    }
 }
 
 fn matches_install_kind(

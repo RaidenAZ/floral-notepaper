@@ -568,14 +568,11 @@ fn stage_windows_helper_copy(paths: &UpdatePaths, source_path: &Path) -> Result<
         )
     })?;
 
-    let source_name = source_path.file_name().ok_or_else(|| {
-        errors::with_detail(
-            errors::app_error("updateInstallSpawnFailed", "更新安装助手路径无效"),
-            "helperSourcePath",
-            source_path.display().to_string(),
-        )
-    })?;
-    let staged_exe = staged_dir.join(source_name);
+    let source_ext = source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("exe");
+    let staged_exe = staged_dir.join(format!("floral-update-helper.{source_ext}"));
     copy_helper_file(source_path, &staged_exe)?;
 
     if let Some(source_dir) = source_path.parent() {
@@ -1182,7 +1179,10 @@ mod tests {
         .expect("stage helper");
 
         let staged_dir = staged.parent().expect("staged helper parent");
-        assert_eq!(staged.file_name(), source.file_name());
+        assert_eq!(
+            staged.file_name().and_then(|n| n.to_str()),
+            Some("floral-update-helper.exe")
+        );
         assert_eq!(fs::read(&staged).expect("read staged exe"), b"helper exe");
         assert_eq!(
             fs::read(staged_dir.join("WebView2Loader.dll")).expect("read staged dll"),

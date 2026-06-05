@@ -162,14 +162,16 @@ fn registry_reports_windows_nsis(current_exe: &Path) -> bool {
         .unwrap_or_default();
 
     ROOTS.iter().any(|root| {
-        let query = format!(
-            r#"chcp 65001 >nul & "{}" query {} /s /f "{}""#,
+        // Use raw_arg to prevent Rust from escaping inner double quotes —
+        // cmd.exe does not understand backslash-escaped quotes.
+        let raw = format!(
+            r#"/c chcp 65001 >nul & "{}" query {} /s /f "{}""#,
             reg_exe_path().display(),
             root,
             exe_name
         );
         Command::new("cmd")
-            .args(["/c", &query])
+            .raw_arg(&raw)
             .creation_flags(windows_sys::Win32::System::Threading::CREATE_NO_WINDOW)
             .output()
             .ok()

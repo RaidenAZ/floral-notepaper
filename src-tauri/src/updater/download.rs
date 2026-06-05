@@ -339,7 +339,7 @@ impl UpdateDownloadService {
             return Ok(DownloadPlan {
                 version: version.to_string(),
                 asset_name: info.asset_name,
-                asset_sha256: asset_sha256.map(ToOwned::to_owned),
+                asset_sha256: info.sha256.or_else(|| asset_sha256.map(ToOwned::to_owned)),
                 asset_size: info.asset_size,
                 source: DownloadSourceUsed::Github,
                 url,

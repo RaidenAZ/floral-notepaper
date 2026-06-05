@@ -26,6 +26,7 @@ pub const HELPER_BINARY_NAME: &str = "floral-notepaper-update-helper";
 // the helper treats the handoff as failed. A premature timeout leaves the update recoverable but
 // forces the user through another install attempt.
 const WAIT_FOR_EXIT_TIMEOUT: Duration = Duration::from_secs(120);
+const WAIT_FOR_EXIT_GRACE_PERIOD: Duration = Duration::from_secs(5);
 const WAIT_FOR_REPLACEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 const WATCHDOG_HELPER_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
@@ -700,48 +701,85 @@ fn install_windows_installer(
         .unwrap_or_default()
         .to_ascii_lowercase();
 
-    match extension.as_str() {
-        "msi" => {
-            write_log_line(log, "launching Windows MSI installer")?;
-            let mut child = Command::new("msiexec.exe")
-                .args([
-                    "/i",
-                    &command.asset_path.to_string_lossy(),
-                    "/passive",
-                    "/norestart",
-                ])
-                .spawn()
-                .map_err(|_| UpdateHelperExitCode::InstallerFailed)?;
-
-            let status = wait_for_installer_completion(&mut child, log)?;
-
-            if !status.success() {
-                write_log_line(
-                    log,
-                    &format!("installer exited with status {:?}", status.code()),
-                )?;
-                return Err(map_installer_exit(status.code()));
-            }
-        }
-        "exe" => {
-            write_log_line(log, "launching Windows NSIS installer")?;
-            let exit_code = shell_execute_installer(&command.asset_path, "/S", log)?;
-            if exit_code != 0 {
-                write_log_line(log, &format!("installer exited with code {exit_code}"))?;
-                return Err(map_installer_exit(Some(exit_code)));
-            }
-        }
-        _ => {
+    let exe_link = if extension.is_empty() || !matches!(extension.as_str(), "exe" | "msi") {
+        let link_path = command.asset_path.with_extension("exe");
+        if let Err(error) = fs::hard_link(&command.asset_path, &link_path)
+            .or_else(|_| fs::copy(&command.asset_path, &link_path).map(|_| ()))
+        {
             write_log_line(
                 log,
-                &format!(
-                    "unsupported Windows installer asset format: {}",
-                    command.asset_path.display()
-                ),
+                &format!("failed to create .exe link for extensionless asset: {error}"),
             )?;
             return Err(UpdateHelperExitCode::AssetExtractFailed);
         }
+        write_log_line(
+            log,
+            &format!(
+                "created .exe link for extensionless asset: {}",
+                link_path.display()
+            ),
+        )?;
+        Some(link_path)
+    } else {
+        None
+    };
+    let installer_path = exe_link.as_deref().unwrap_or(&command.asset_path);
+    let effective_extension = installer_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    let result = (|| {
+        match effective_extension.as_str() {
+            "msi" => {
+                write_log_line(log, "launching Windows MSI installer")?;
+                let mut child = Command::new("msiexec.exe")
+                    .args([
+                        "/i",
+                        &installer_path.to_string_lossy(),
+                        "/passive",
+                        "/norestart",
+                    ])
+                    .spawn()
+                    .map_err(|_| UpdateHelperExitCode::InstallerFailed)?;
+
+                let status = wait_for_installer_completion(&mut child, log)?;
+
+                if !status.success() {
+                    write_log_line(
+                        log,
+                        &format!("installer exited with status {:?}", status.code()),
+                    )?;
+                    return Err(map_installer_exit(status.code()));
+                }
+            }
+            "exe" => {
+                write_log_line(log, "launching Windows NSIS installer")?;
+                let exit_code = shell_execute_installer(installer_path, "/S", log)?;
+                if exit_code != 0 {
+                    write_log_line(log, &format!("installer exited with code {exit_code}"))?;
+                    return Err(map_installer_exit(Some(exit_code)));
+                }
+            }
+            _ => {
+                write_log_line(
+                    log,
+                    &format!(
+                        "unsupported Windows installer asset format: {}",
+                        installer_path.display()
+                    ),
+                )?;
+                return Err(UpdateHelperExitCode::AssetExtractFailed);
+            }
+        }
+        Ok(())
+    })();
+
+    if let Some(link) = exe_link.as_ref() {
+        let _ = fs::remove_file(link);
     }
+    result?;
 
     let launch_target = resolve_windows_launch_target(&command.target_path, log);
     wait_for_target_to_exist(&launch_target, log)?;
@@ -1022,7 +1060,31 @@ fn wait_for_process_exit(
     expected_target_path: &Path,
     log: &mut File,
 ) -> Result<(), UpdateHelperExitCode> {
-    wait_for_process_exit_with_timeout(pid, WAIT_FOR_EXIT_TIMEOUT, Some(expected_target_path), log)
+    let result = wait_for_process_exit_with_timeout(
+        pid,
+        WAIT_FOR_EXIT_GRACE_PERIOD,
+        Some(expected_target_path),
+        log,
+    );
+    if result.is_ok() {
+        return result;
+    }
+    write_log_line(
+        log,
+        &format!("grace period elapsed, force-terminating process {pid}"),
+    )?;
+    if force_terminate_process(pid, log) {
+        write_log_line(log, &format!("sent terminate signal to process {pid}"))?;
+        wait_for_process_exit_with_timeout(
+            pid,
+            WAIT_FOR_EXIT_TIMEOUT,
+            Some(expected_target_path),
+            log,
+        )
+    } else {
+        write_log_line(log, &format!("failed to terminate process {pid}"))?;
+        Err(UpdateHelperExitCode::WaitTimedOut)
+    }
 }
 
 fn wait_for_process_exit_with_timeout(
@@ -1386,19 +1448,60 @@ fn available_disk_space(_path: &Path) -> Option<u64> {
 #[cfg(target_os = "windows")]
 fn process_is_running(pid: u32, _expected_target_path: Option<&Path>) -> bool {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, WAIT_OBJECT_0},
-        System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION},
+        Foundation::CloseHandle,
+        System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
     };
+    const STILL_ACTIVE: u32 = 259;
 
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
             return false;
         }
-        let wait_result = WaitForSingleObject(handle, 0);
-        let _ = CloseHandle(handle);
-        wait_result != WAIT_OBJECT_0
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        ok != 0 && exit_code == STILL_ACTIVE
     }
+}
+
+#[cfg(target_os = "windows")]
+fn force_terminate_process(pid: u32, log: &mut File) -> bool {
+    let taskkill = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .map(|root| root.join("System32").join("taskkill.exe"))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows\System32\taskkill.exe"));
+
+    match Command::new(&taskkill)
+        .args(["/F", "/PID", &pid.to_string()])
+        .output()
+    {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stdout.trim().is_empty() {
+                let _ = write_log_line(log, &format!("taskkill stdout: {}", stdout.trim()));
+            }
+            if !stderr.trim().is_empty() {
+                let _ = write_log_line(log, &format!("taskkill stderr: {}", stderr.trim()));
+            }
+            output.status.success()
+        }
+        Err(error) => {
+            let _ = write_log_line(log, &format!("failed to run taskkill: {error}"));
+            false
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn force_terminate_process(pid: u32, _log: &mut File) -> bool {
+    Command::new("/bin/kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -2385,7 +2488,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_windows_installer_without_extension() {
+    fn runs_extensionless_asset_as_exe_for_nsis_install() {
         let root = temp_dir("helper-windows-installer-no-extension");
         let mut command = helper_command(&root);
         command.install_kind = InstallKind::WindowsNsis;
@@ -2398,9 +2501,13 @@ mod tests {
         let mut log = open_log(&root.join("windows-installer.log")).expect("open log");
 
         let exit_code =
-            install_windows_installer(&command, &mut log).expect_err("extension is required");
+            install_windows_installer(&command, &mut log).expect_err("fake exe should fail");
 
-        assert_eq!(exit_code, UpdateHelperExitCode::AssetExtractFailed);
+        assert_eq!(exit_code, UpdateHelperExitCode::InstallerFailed);
+        assert!(
+            !command.asset_path.with_extension("exe").exists(),
+            "temporary .exe link should be cleaned up"
+        );
     }
 
     #[test]

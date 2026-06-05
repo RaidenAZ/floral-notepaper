@@ -566,11 +566,18 @@ fn schedule_force_terminate_self() {
     });
 }
 
-// std::process::exit runs atexit handlers which deadlock with WebView2 on Windows.
+// std::process::exit and ExitProcess both run DLL detach handlers that can
+// deadlock with WebView2 on Windows.  TerminateProcess skips DLL cleanup
+// entirely, which is safe here because the update helper will replace the
+// binary anyway.
 fn force_terminate_self() -> ! {
     #[cfg(target_os = "windows")]
     unsafe {
-        windows_sys::Win32::System::Threading::ExitProcess(0);
+        windows_sys::Win32::System::Threading::TerminateProcess(
+            windows_sys::Win32::System::Threading::GetCurrentProcess(),
+            0,
+        );
+        std::hint::unreachable_unchecked();
     }
     #[cfg(not(target_os = "windows"))]
     std::process::exit(0);
