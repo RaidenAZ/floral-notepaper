@@ -7,14 +7,13 @@ use super::{
     UpdatePaths,
 };
 use chrono::Utc;
-use sha2::{Digest, Sha256};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::{
     collections::BTreeMap,
     ffi::OsString,
     fs::{self, File, OpenOptions},
-    io::{BufReader, Read, Write},
+    io::Write,
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -3282,35 +3281,7 @@ fn write_log_line(file: &mut File, line: &str) -> Result<(), UpdateHelperExitCod
 }
 
 fn sha256_hex(path: &Path) -> Result<String, std::io::Error> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut digest = Sha256::new();
-    let mut buffer = [0u8; 8192];
-
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-
-    let bytes = digest.finalize();
-    let mut hex = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        hex.push(nibble_to_hex(byte >> 4));
-        hex.push(nibble_to_hex(byte & 0x0f));
-    }
-    Ok(hex)
-}
-
-fn nibble_to_hex(value: u8) -> char {
-    debug_assert!(value <= 0x0f);
-    match value {
-        0..=9 => (b'0' + value) as char,
-        10..=15 => (b'a' + (value - 10)) as char,
-        _ => unreachable!("nibble_to_hex only accepts 4-bit values"),
-    }
+    super::sha256_hex(path)
 }
 
 #[cfg(target_os = "macos")]

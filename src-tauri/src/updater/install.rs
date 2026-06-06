@@ -22,11 +22,7 @@ const UPDATE_HELPER_PATH_ENV: &str = "FLORAL_NOTEPAPER_UPDATE_HELPER_PATH";
 const UPDATE_HELPER_MODE_ENV: &str = "FLORAL_NOTEPAPER_UPDATE_HELPER_MODE";
 
 macro_rules! debug_log {
-    ($($arg:tt)*) => {{
-        if cfg!(debug_assertions) {
-            eprintln!("[update:install] {}", format!($($arg)*));
-        }
-    }};
+    ($($arg:tt)*) => { super::debug_log!("install", $($arg)*) };
 }
 const HELPER_READY_TIMEOUT: Duration = Duration::from_secs(30);
 const HELPER_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -488,18 +484,7 @@ fn current_bundle_name(platform: &PlatformInfo) -> Option<std::ffi::OsString> {
 }
 
 fn find_bundle_path_from_executable_path(executable_path: &Path) -> Option<PathBuf> {
-    let mut current = executable_path.parent();
-    while let Some(path) = current {
-        if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("app"))
-        {
-            return Some(path.to_path_buf());
-        }
-        current = path.parent();
-    }
-    None
+    platform::find_macos_app_bundle(executable_path)
 }
 
 fn build_helper_not_found_error(platform: &PlatformInfo, message: &str) -> AppError {
@@ -534,7 +519,6 @@ fn stage_helper_copy(
     platform: &PlatformInfo,
     source_path: &Path,
 ) -> Result<PathBuf, AppError> {
-    paths.ensure_dirs()?;
     if platform.install_kind == super::types::InstallKind::MacosAppBundle
         && source_path
             .extension()

@@ -14,13 +14,7 @@ use crate::desktop;
 use crate::services::notes::AppError;
 use chrono::Utc;
 
-macro_rules! debug_log {
-    ($label:literal, $($arg:tt)*) => {{
-        if cfg!(debug_assertions) {
-            eprintln!("[update:{}] {}", $label, format!($($arg)*));
-        }
-    }};
-}
+use super::debug_log;
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -539,20 +533,20 @@ fn finalize_update_check<E: UpdateCheckEmitter>(
     current_version: &str,
     result: Result<UpdateCheckResult, AppError>,
 ) -> Result<UpdateCheckResult, AppError> {
-    if let Ok(next_state) = super::state::load_with_current_version(paths, current_version) {
+    let loaded_state = super::state::load_with_current_version(paths, current_version).ok();
+    if let Some(next_state) = &loaded_state {
         debug_log!(
             "check",
             "发出 update://checked status={:?}",
             next_state.status
         );
-        emitter.emit_checked(&next_state);
+        emitter.emit_checked(next_state);
     }
 
     match result {
         Ok(check_result) => Ok(check_result),
         Err(error) => {
-            let error_payload = super::state::load_with_current_version(paths, current_version)
-                .ok()
+            let error_payload = loaded_state
                 .and_then(|saved_state| saved_state.last_error)
                 .unwrap_or_else(|| {
                     super::types::UpdateErrorDto::recoverable(

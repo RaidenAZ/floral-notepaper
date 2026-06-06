@@ -40,11 +40,7 @@ fn mirror_chyan_res_id() -> &'static str {
 }
 
 macro_rules! debug_log {
-    ($($arg:tt)*) => {{
-        if cfg!(debug_assertions) {
-            eprintln!("[update:check] {}", format!($($arg)*));
-        }
-    }};
+    ($($arg:tt)*) => { super::debug_log!("check", $($arg)*) };
 }
 
 #[derive(Debug, Clone)]
@@ -468,7 +464,7 @@ impl UpdateCheckService {
     }
 }
 
-fn env_manifest_path(key: &str) -> Option<PathBuf> {
+pub(super) fn env_manifest_path(key: &str) -> Option<PathBuf> {
     env::var_os(key).and_then(|value| {
         let value = value.to_string_lossy().trim().to_string();
         (!value.is_empty()).then(|| PathBuf::from(value))
@@ -932,16 +928,7 @@ fn matches_install_kind(
     inferred: &super::types::InstallKind,
     current: &super::types::InstallKind,
 ) -> bool {
-    use super::types::InstallKind;
-    if *current == InstallKind::Unknown {
-        return true;
-    }
-    matches!(
-        (inferred, current),
-        (InstallKind::MacosAppBundle, InstallKind::MacosAppBundle)
-            | (InstallKind::WindowsNsis, InstallKind::WindowsNsis)
-            | (InstallKind::WindowsPortable, InstallKind::WindowsPortable)
-    )
+    *current == super::types::InstallKind::Unknown || inferred == current
 }
 
 fn persist_last_auto_check_at(

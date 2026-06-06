@@ -16,7 +16,7 @@ use reqwest::{
 };
 use sha2::{Digest, Sha256};
 use std::{
-    env, fs,
+    fs,
     io::{BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::{
@@ -28,11 +28,7 @@ use std::{
 };
 
 macro_rules! debug_log {
-    ($($arg:tt)*) => {{
-        if cfg!(debug_assertions) {
-            eprintln!("[update:download] {}", format!($($arg)*));
-        }
-    }};
+    ($($arg:tt)*) => { super::debug_log!("download", $($arg)*) };
 }
 
 const GITHUB_MANIFEST_PATH_ENV: &str = "FLORAL_NOTEPAPER_UPDATE_GITHUB_MANIFEST_PATH";
@@ -782,12 +778,7 @@ fn cleanup_partial_downloads_in_dir(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn env_manifest_path(key: &str) -> Option<PathBuf> {
-    env::var_os(key).and_then(|value| {
-        let value = value.to_string_lossy().trim().to_string();
-        (!value.is_empty()).then(|| PathBuf::from(value))
-    })
-}
+use super::check::env_manifest_path;
 
 fn validate_download_url(
     raw_url: &str,

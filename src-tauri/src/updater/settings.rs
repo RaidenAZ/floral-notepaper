@@ -88,7 +88,6 @@ impl Default for StoredUpdateSettings {
 }
 
 pub fn load(paths: &UpdatePaths) -> Result<StoredUpdateSettings, AppError> {
-    paths.ensure_dirs()?;
     let path = paths.settings_path();
     if !path.exists() {
         let settings = StoredUpdateSettings::default();
@@ -111,7 +110,6 @@ pub fn load(paths: &UpdatePaths) -> Result<StoredUpdateSettings, AppError> {
 }
 
 pub fn save(paths: &UpdatePaths, settings: &StoredUpdateSettings) -> Result<(), AppError> {
-    paths.ensure_dirs()?;
     write_json_atomic(&paths.settings_path(), settings)
 }
 

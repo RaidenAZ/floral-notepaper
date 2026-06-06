@@ -14,6 +14,15 @@ pub mod state;
 pub mod types;
 pub mod version;
 
+macro_rules! debug_log {
+    ($label:literal, $($arg:tt)*) => {{
+        if cfg!(debug_assertions) {
+            eprintln!("[update:{}] {}", $label, format!($($arg)*));
+        }
+    }};
+}
+pub(super) use debug_log;
+
 use crate::services::notes::{default_store, AppError};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -28,6 +37,32 @@ use std::{
 use uuid::Uuid;
 
 pub const APP_ID: &str = "com.floral-notepaper.app";
+
+pub(super) fn sha256_hex(path: &Path) -> Result<String, std::io::Error> {
+    use sha2::{Digest, Sha256};
+    use std::io::{BufReader, Read};
+
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    let mut digest = Sha256::new();
+    let mut buffer = [0u8; 8192];
+
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+
+    let bytes = digest.finalize();
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        hex.push(char::from_digit((byte >> 4) as u32, 16).unwrap_or('0'));
+        hex.push(char::from_digit((byte & 0x0f) as u32, 16).unwrap_or('0'));
+    }
+    Ok(hex)
+}
 pub use scheduler::start_auto_check_scheduler;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

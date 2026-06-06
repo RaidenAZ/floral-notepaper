@@ -224,7 +224,7 @@ pub(crate) fn normalize_windows_path(value: &str) -> String {
     value.replace('/', "\\").to_ascii_lowercase()
 }
 
-fn find_macos_app_bundle(exe: &Path) -> Option<PathBuf> {
+pub(crate) fn find_macos_app_bundle(exe: &Path) -> Option<PathBuf> {
     let mut current = exe.parent();
     while let Some(path) = current {
         if path.extension().and_then(|ext| ext.to_str()) == Some("app") {

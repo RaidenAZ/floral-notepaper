@@ -5,13 +5,7 @@ use super::{
     version, UpdatePaths,
 };
 use crate::services::notes::AppError;
-use sha2::{Digest, Sha256};
-use std::{
-    fs::{self, File},
-    io,
-    io::{BufReader, Read},
-    path::Path,
-};
+use std::{fs, io, path::Path};
 
 #[cfg(test)]
 pub fn load(paths: &UpdatePaths) -> Result<UpdateStateDto, AppError> {
@@ -30,7 +24,6 @@ fn load_with_current_version_unlocked(
     paths: &UpdatePaths,
     current_version: &str,
 ) -> Result<UpdateStateDto, AppError> {
-    paths.ensure_dirs()?;
     let path = paths.state_path();
     if !path.exists() {
         let state = UpdateStateDto::idle_with_version(current_version);
@@ -91,7 +84,6 @@ pub fn save(paths: &UpdatePaths, state: &UpdateStateDto) -> Result<(), AppError>
 }
 
 fn save_unlocked(paths: &UpdatePaths, state: &UpdateStateDto) -> Result<(), AppError> {
-    paths.ensure_dirs()?;
     write_json_atomic(&paths.state_path(), state)
 }
 
@@ -262,26 +254,7 @@ fn is_valid_sha256_hex(value: &str) -> bool {
 }
 
 fn sha256_hex(path: &Path) -> Result<String, std::io::Error> {
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut digest = Sha256::new();
-    let mut buffer = [0u8; 8192];
-
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-
-    let bytes = digest.finalize();
-    let mut hex = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        hex.push(char::from_digit((byte >> 4) as u32, 16).unwrap_or('0'));
-        hex.push(char::from_digit((byte & 0x0f) as u32, 16).unwrap_or('0'));
-    }
-    Ok(hex)
+    super::sha256_hex(path)
 }
 
 #[cfg(test)]
