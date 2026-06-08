@@ -1012,8 +1012,10 @@ fn clear_hidden_window_state(app: &AppHandle) {
     };
 
     for label in &labels {
-        if let Some(window) = app.get_webview_window(label) {
-            let _ = window.close();
+        if label.starts_with("notepad-") || label.starts_with("tile-") {
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.close();
+            }
         }
     }
 }
@@ -1029,7 +1031,7 @@ fn toggle_app_visibility(app: &AppHandle) {
             if let Some(window) = app.get_webview_window(label) {
                 let _ = window.unminimize();
                 let _ = window.show();
-                if focus_target.is_none() {
+                if focus_target.is_none() || label == MAIN_WINDOW_LABEL {
                     focus_target = Some(label.clone());
                 }
             }
@@ -1045,9 +1047,6 @@ fn toggle_app_visibility(app: &AppHandle) {
 
     let mut labels = Vec::new();
     for (label, window) in app.webview_windows() {
-        if label == MAIN_WINDOW_LABEL {
-            continue;
-        }
         if window.is_visible().unwrap_or(false) {
             labels.push(label.clone());
             let _ = window.hide();
