@@ -336,7 +336,9 @@ export function MainWindow({
   const [renamingCategory, setRenamingCategory] = useState<string | null>(null);
   const [renameCategoryValue, setRenameCategoryValue] = useState("");
   const [dragOverCategory, setDragOverCategory] = useState<string | null>(null);
-  const [settingsOverlay, setSettingsOverlay] = useState(() => window.innerWidth < 1080);
+  const [settingsOverlay, setSettingsOverlay] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth < 1080 : true,
+  );
   const [sidebarWidth, setSidebarWidth] = useState(280);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [splitRatio, setSplitRatio] = useState(0.5);
@@ -351,6 +353,12 @@ export function MainWindow({
   const lastExternalSaveRef = useRef<number>(0);
   const imageBaseDir = useImageBaseDir();
   const saveStateRef = useRef(saveState);
+  const isMacOS = useMemo(() => {
+    return (
+      typeof navigator !== "undefined" &&
+      (/Mac|iPhone|iPad/.test(navigator.platform) || navigator.userAgent.includes("Mac"))
+    );
+  }, []);
   saveStateRef.current = saveState;
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
@@ -1598,7 +1606,9 @@ export function MainWindow({
       <div className="relative noise-bg bg-cloud overflow-hidden flex flex-col flex-1">
         <BackgroundLayer config={settingsConfig} />
         <div
-          className="relative z-10 flex items-center justify-between pl-5 pr-0 h-11 bg-paper/55 backdrop-blur-[1px] border-b border-paper-deep/30 shrink-0 select-none cursor-default"
+          className={`relative z-10 flex items-center justify-between h-11 bg-paper/55 backdrop-blur-[1px] border-b border-paper-deep/30 shrink-0 select-none cursor-default ${
+            isMacOS ? "pl-20 pr-5" : "pl-5 pr-0"
+          }`}
           onMouseDown={handleTitleBarDrag}
           onDoubleClick={handleTitleBarDoubleClick}
         >
@@ -1707,68 +1717,72 @@ export function MainWindow({
               ) : null}
             </button>
 
-            <div className="w-px h-4 bg-paper-deep/30 mx-0.5" />
+            {!isMacOS && (
+              <>
+                <div className="w-px h-4 bg-paper-deep/30 mx-0.5" />
 
-            <button
-              onClick={handleMinimize}
-              className="w-11 h-11 flex items-center justify-center text-ink-ghost hover:text-ink-soft hover:bg-paper-warm transition-all cursor-pointer"
-              title={t("main.window.minimize", { defaultValue: "最小化" })}
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12">
-                <rect x="1" y="5.5" width="10" height="1" fill="currentColor" rx="0.5" />
-              </svg>
-            </button>
-            <button
-              onClick={handleMaximize}
-              className="w-11 h-11 flex items-center justify-center text-ink-ghost hover:text-ink-soft hover:bg-paper-warm transition-all cursor-pointer"
-              title={
-                isMaximized
-                  ? t("main.window.restore", { defaultValue: "还原" })
-                  : t("main.window.maximize", { defaultValue: "最大化" })
-              }
-            >
-              {isMaximized ? (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 12 12"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
+                <button
+                  onClick={handleMinimize}
+                  className="w-11 h-11 flex items-center justify-center text-ink-ghost hover:text-ink-soft hover:bg-paper-warm transition-all cursor-pointer"
+                  title={t("main.window.minimize", { defaultValue: "最小化" })}
                 >
-                  <rect x="3" y="3" width="7" height="7" rx="1" />
-                  <path d="M3 5H2V2a1 1 0 0 1 1-1h5v1" />
-                </svg>
-              ) : (
-                <svg
-                  width="12"
-                  height="12"
-                  viewBox="0 0 12 12"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
+                  <svg width="12" height="12" viewBox="0 0 12 12">
+                    <rect x="1" y="5.5" width="10" height="1" fill="currentColor" rx="0.5" />
+                  </svg>
+                </button>
+                <button
+                  onClick={handleMaximize}
+                  className="w-11 h-11 flex items-center justify-center text-ink-ghost hover:text-ink-soft hover:bg-paper-warm transition-all cursor-pointer"
+                  title={
+                    isMaximized
+                      ? t("main.window.restore", { defaultValue: "还原" })
+                      : t("main.window.maximize", { defaultValue: "最大化" })
+                  }
                 >
-                  <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" />
-                </svg>
-              )}
-            </button>
-            <button
-              onClick={handleClose}
-              className="w-11 h-11 flex items-center justify-center text-ink-ghost hover:text-red-500 hover:bg-danger-bg transition-all cursor-pointer"
-              title={t("main.window.close", { defaultValue: "关闭" })}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 12 12"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              >
-                <path d="M2 2l8 8M10 2l-8 8" />
-              </svg>
-            </button>
+                  {isMaximized ? (
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                    >
+                      <rect x="3" y="3" width="7" height="7" rx="1" />
+                      <path d="M3 5H2V2a1 1 0 0 1 1-1h5v1" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 12 12"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                    >
+                      <rect x="1.5" y="1.5" width="9" height="9" rx="1.5" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={handleClose}
+                  className="w-11 h-11 flex items-center justify-center text-ink-ghost hover:text-red-500 hover:bg-danger-bg transition-all cursor-pointer"
+                  title={t("main.window.close", { defaultValue: "关闭" })}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 12 12"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  >
+                    <path d="M2 2l8 8M10 2l-8 8" />
+                  </svg>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
