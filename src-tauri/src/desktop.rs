@@ -1057,6 +1057,14 @@ fn toggle_app_visibility(app: &AppHandle) {
             let _ = window.hide();
         }
     }
+
+    if labels.is_empty() {
+        if let Err(error) = show_main_window(app) {
+            eprintln!("failed to show main window from visibility toggle: {error}");
+        }
+        return;
+    }
+
     state.hide_windows(labels);
 }
 
