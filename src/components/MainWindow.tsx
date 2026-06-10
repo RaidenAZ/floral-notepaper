@@ -347,6 +347,7 @@ export function MainWindow({
   const [categoryMenu, setCategoryMenu] = useState<CategoryMenuState | null>(null);
   const [categoryMenuClosing, setCategoryMenuClosing] = useState(false);
   const [categoryMenuConfirmDelete, setCategoryMenuConfirmDelete] = useState(false);
+  const [categoryMenuHoverSuppressed, setCategoryMenuHoverSuppressed] = useState(false);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const windowLabelRef = useRef("main");
   const externalFileMtimeRef = useRef<number>(0);
@@ -971,9 +972,27 @@ export function MainWindow({
       setCategoryMenu(null);
       setCategoryMenuClosing(false);
       setCategoryMenuConfirmDelete(false);
+      setCategoryMenuHoverSuppressed(false);
     }, 150);
     return () => window.clearTimeout(timer);
   }, [categoryMenuClosing, categoryMenu]);
+
+  useEffect(() => {
+    if (!categoryMenuHoverSuppressed || !categoryMenu) return;
+    const releaseHover = () => setCategoryMenuHoverSuppressed(false);
+    window.addEventListener("mousemove", releaseHover, { once: true });
+    window.addEventListener("mousedown", releaseHover, { once: true });
+    return () => {
+      window.removeEventListener("mousemove", releaseHover);
+      window.removeEventListener("mousedown", releaseHover);
+    };
+  }, [categoryMenuHoverSuppressed, categoryMenu]);
+
+  const switchCategoryMenuPanel = useCallback((confirmDelete: boolean) => {
+    setCategoryMenuHoverSuppressed(true);
+    setCategoryMenuConfirmDelete(confirmDelete);
+    (document.activeElement as HTMLElement | null)?.blur();
+  }, []);
 
   const saveCurrentNote = useCallback(async () => {
     if (!selectedId) return null;
@@ -2445,6 +2464,7 @@ export function MainWindow({
                       {t("main.editor.confirmDelete", { defaultValue: "确认删除？" })}
                     </span>
                     <button
+                      onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         setDeleteExiting(true);
                         setTimeout(() => {
@@ -2453,11 +2473,12 @@ export function MainWindow({
                           void handleDeleteNote();
                         }, 150);
                       }}
-                      className="px-2 h-6 rounded-md text-[11px] text-cloud bg-red-400 hover:bg-red-500 transition-colors cursor-pointer whitespace-nowrap"
+                      className="px-2 h-6 rounded-md text-[11px] text-cloud bg-red-400 hover:bg-red-500 transition-colors cursor-pointer whitespace-nowrap outline-none"
                     >
                       {t("common.delete", { defaultValue: "删除" })}
                     </button>
                     <button
+                      onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         setDeleteExiting(true);
                         setTimeout(() => {
@@ -2465,7 +2486,7 @@ export function MainWindow({
                           setDeleteConfirm(false);
                         }, 150);
                       }}
-                      className="px-2 h-6 rounded-md text-[11px] text-ink-faint hover:text-ink-soft hover:bg-paper-warm transition-colors cursor-pointer"
+                      className="px-2 h-6 rounded-md text-[11px] text-ink-faint hover:text-ink-soft hover:bg-paper-warm transition-colors cursor-pointer outline-none"
                     >
                       {t("common.cancel", { defaultValue: "取消" })}
                     </button>
@@ -2750,7 +2771,7 @@ export function MainWindow({
       </div>
       {noteMenu && noteMenuTarget && (
         <div
-          className={`fixed z-[9999] min-w-[168px] py-1.5 bg-cloud/95 backdrop-blur-sm border border-paper-deep/50 rounded-lg overflow-hidden select-none ${noteMenuClosing ? "animate-menu-exit" : "animate-menu-enter"}`}
+          className={`popup-menu fixed z-[9999] min-w-[168px] py-1.5 bg-cloud/95 backdrop-blur-sm border border-paper-deep/50 rounded-lg overflow-hidden select-none ${noteMenuClosing ? "animate-menu-exit" : "animate-menu-enter"}`}
           style={{ left: noteMenu.x, top: noteMenu.y }}
           onMouseDown={(event) => event.stopPropagation()}
         >
@@ -2812,12 +2833,13 @@ export function MainWindow({
 
       {categoryMenu && (
         <div
-          className={`fixed z-[9999] min-w-[140px] py-1.5 bg-cloud/95 backdrop-blur-sm border border-paper-deep/50 rounded-lg overflow-hidden select-none ${categoryMenuClosing ? "animate-menu-exit" : "animate-menu-enter"}`}
+          className={`popup-menu fixed z-[9999] min-w-[140px] py-1.5 bg-cloud/95 backdrop-blur-sm border border-paper-deep/50 rounded-lg overflow-hidden select-none ${categoryMenuClosing ? "animate-menu-exit" : "animate-menu-enter"}`}
+          data-hover-suppressed={categoryMenuHoverSuppressed ? "" : undefined}
           style={{ left: categoryMenu.x, top: categoryMenu.y }}
           onMouseDown={(event) => event.stopPropagation()}
         >
           {categoryMenuConfirmDelete ? (
-            <div className="animate-menu-slide-left">
+            <div key="category-confirm" className="animate-menu-slide-left">
               <div className="px-3 py-1.5 text-[11px] font-body text-ink-faint border-b border-paper-deep/20">
                 {t("main.category.confirmDelete", {
                   category: categoryMenu.category,
@@ -2825,23 +2847,25 @@ export function MainWindow({
                 })}
               </div>
               <button
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   void handleDeleteCategory(categoryMenu.category);
                   setCategoryMenuClosing(true);
                 }}
-                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-red-400 hover:bg-danger-bg hover:text-red-500 transition-colors cursor-pointer"
+                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-red-400 hover:bg-danger-bg hover:text-red-500 transition-colors cursor-pointer outline-none"
               >
                 {t("main.category.confirmDeleteAction", { defaultValue: "确认删除" })}
               </button>
               <button
-                onClick={() => setCategoryMenuConfirmDelete(false)}
-                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => switchCategoryMenuPanel(false)}
+                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-ink-soft hover:bg-bamboo-mist/60 hover:text-bamboo transition-colors cursor-pointer outline-none"
               >
                 {t("common.cancel", { defaultValue: "取消" })}
               </button>
             </div>
           ) : (
-            <div className="animate-menu-slide-right">
+            <div key="category-main" className="animate-menu-slide-right">
               <button
                 onClick={() => {
                   setCategoryMenuClosing(true);
@@ -2853,8 +2877,9 @@ export function MainWindow({
                 {t("main.category.rename", { defaultValue: "重命名" })}
               </button>
               <button
-                onClick={() => setCategoryMenuConfirmDelete(true)}
-                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-red-400 hover:bg-danger-bg hover:text-red-500 transition-colors cursor-pointer border-t border-paper-deep/20"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => switchCategoryMenuPanel(true)}
+                className="w-full text-left px-3 py-1.5 text-[12px] font-body text-red-400 hover:bg-danger-bg hover:text-red-500 transition-colors cursor-pointer border-t border-paper-deep/20 outline-none"
               >
                 {t("main.category.delete", { defaultValue: "删除分类" })}
               </button>

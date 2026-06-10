@@ -536,6 +536,22 @@ input::placeholder {
   pointer-events: none;
 }
 
+.popup-menu button {
+  outline: none;
+}
+.popup-menu button:focus-visible {
+  outline: none;
+}
+.popup-menu[data-hover-suppressed] button:hover {
+  background-color: transparent !important;
+}
+.popup-menu[data-hover-suppressed] button.text-red-400:hover {
+  color: rgb(248 113 113) !important;
+}
+.popup-menu[data-hover-suppressed] button.text-ink-soft:hover {
+  color: var(--color-ink-soft) !important;
+}
+
 /* Save status crossfade */
 @keyframes status-fade {
   from {
